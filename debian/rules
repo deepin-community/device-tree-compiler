@@ -5,10 +5,9 @@
 # respect SOURCE_DATE_EPOCH.
 export FORCE_SOURCE_DATE=1
 
+include /usr/share/dpkg/pkg-info.mk
+export SETUPTOOLS_SCM_PRETEND_VERSION=$(DEB_VERSION_UPSTREAM)
 export DEB_BUILD_MAINT_OPTIONS=hardening=+all
-
-# python library builds with warnings, temporarily disabled.
-export NO_PYTHON = 1
 
 include /usr/share/dpkg/architecture.mk
 ifeq ($(origin CC),default)
@@ -16,24 +15,24 @@ export CC = $(DEB_HOST_GNU_TYPE)-gcc
 endif
 
 include /usr/share/dpkg/buildflags.mk
-CFLAGS += -fPIC -Werror -Wall -Wpointer-arith -Wcast-qual	\
-	-Wnested-externs -Wstrict-prototypes -Wmissing-prototypes	\
-	-Wredundant-decls -Wshadow
+EXTRA_CFLAGS = $(CFLAGS) -Wno-error
 CPPFLAGS += -I libfdt -I .
 
 %:
-	dh $@
+	dh $@ --with python3
 
 override_dh_auto_build:
-	dh_auto_build -- V=1 CFLAGS="$(CFLAGS)" CPPFLAGS="$(CPPFLAGS)"
+	dh_auto_build -- V=1 EXTRA_CFLAGS="$(EXTRA_CFLAGS)" CPPFLAGS="$(CPPFLAGS)"
 ifeq (,$(findstring nodoc,$(DEB_BUILD_OPTIONS)))
 	$(MAKE) -C Documentation
 endif
 
 override_dh_auto_install:
-	$(MAKE) install DESTDIR=$(CURDIR)/debian/tmp PREFIX=/usr LIBDIR=/usr/lib/$(DEB_HOST_MULTIARCH)
+	NO_PYTHON=1 $(MAKE) install DESTDIR=$(CURDIR)/debian/tmp PREFIX=/usr LIBDIR=/usr/lib/$(DEB_HOST_MULTIARCH)
+	$(MAKE) maybe_install_pylibfdt EXTRA_CFLAGS="$(EXTRA_CFLAGS)" PREFIX=$(CURDIR)/debian/tmp/usr
 
 override_dh_auto_clean:
 	dh_auto_clean
 	[ ! -f Documentation/Makefile ] || $(MAKE) -C Documentation clean
 	[ ! -d build ] || rm -rf build
+	[ ! -d pylibfdt/libfdt.egg-info/ ] || rm -rf pylibfdt/libfdt.egg-info/

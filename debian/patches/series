@@ -1,1 +1,4 @@
 01_build_doc.patch
+02_Move_setup.py_to_the_top_level.patch
+03_fix_with_Python_3.10.patch
+04_Install_to_dist_packages.patch

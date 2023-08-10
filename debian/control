@@ -2,13 +2,18 @@ Source: device-tree-compiler
 Section: devel
 Priority: optional
 Maintainer: Héctor Orón Martínez <zumbi@debian.org>
-Uploaders: Riku Voipio <riku.voipio@linaro.org>, Vagrant Cascadian <vagrant@debian.org>
-Standards-Version: 4.5.0
-Build-Depends: debhelper-compat (= 12),
+Uploaders: Vagrant Cascadian <vagrant@debian.org>
+Standards-Version: 4.6.1
+Build-Depends: debhelper-compat (= 13),
+ dh-python,
  flex,
  bison,
  libyaml-dev,
  pkg-config,
+ python3-dev,
+ python3-setuptools,
+ python3-setuptools-scm,
+ swig,
  texlive <!nodoc>,
  texlive-latex-extra <!nodoc>,
  valgrind [amd64 arm64 armhf i386 mips mips64el mipsel powerpc ppc64 ppc64el s390x],
@@ -46,3 +51,13 @@ Description: Flat Device Trees manipulation library - development files
  This is a library containing functions for manipulating Flat Device Trees.
  .
  This package contains the files needed for development against libfdt.
+
+Package: python3-libfdt
+Architecture: any
+Section: python
+Depends: ${python3:Depends}, ${shlibs:Depends}, ${misc:Depends}
+Provides: ${python3:Provides}
+Description: Flat Device Trees manipulation library - Python bindings
+ This is a library containing functions for manipulating Flat Device Trees.
+ .
+ This package contains the files needed for Python development with libfdt.
