@@ -1,0 +1,132 @@
+Origin: backport, 23b56cb7e18992650c79a04c9e4e3f2740bc1fbd
+From: Rob Herring <robh@kernel.org>
+Date: Wed, 10 Nov 2021 19:11:35 -0600
+Subject: pylibfdt: Move setup.py to the top level
+
+Using 'pip' and several setup.py sub-commands currently don't work with
+pylibfdt. The primary reason is Python packaging has opinions on the
+directory structure of repositories and one of those appears to be the
+inability to reference source files outside of setup.py's subtree. This
+means a sdist cannot be created with all necessary source components
+(i.e. libfdt headers). Moving setup.py to the top-level solves these
+problems.
+
+With this change. the following commands now work:
+
+Creating packages for pypi.org:
+./setup.py sdist bdist_wheel
+
+Using pip for installs:
+pip install .
+pip install git+http://github.com/robherring/dtc.git@pypi-v2
+
+Signed-off-by: Rob Herring <robh@kernel.org>
+Message-Id: <20211111011135.2386773-5-robh@kernel.org>
+Signed-off-by: David Gibson <david@gibson.dropbear.id.au>
+---
+ MANIFEST.in                |  9 ++++++++
+ pylibfdt/Makefile.pylibfdt |  3 +--
+ pylibfdt/meson.build       |  4 ++--
+ setup.py                   | 51 ++++++++++++++++++++++++++++++++++++++++++++++
+ 6 files changed, 67 insertions(+), 54 deletions(-)
+ create mode 100644 MANIFEST.in
+ create mode 100755 setup.py
+
+diff --git a/MANIFEST.in b/MANIFEST.in
+new file mode 100644
+index 0000000..9e6c4ac
+--- /dev/null
++++ b/MANIFEST.in
+@@ -0,0 +1,9 @@
++# SPDX-License-Identifier: (GPL-2.0-or-later OR BSD-2-Clause)
++
++global-exclude *
++include setup.py
++include pylibfdt/libfdt.i
++include pylibfdt/*.py
++include libfdt/libfdt.h
++include libfdt/fdt.h
++include libfdt/libfdt_env.h
+diff --git a/pylibfdt/Makefile.pylibfdt b/pylibfdt/Makefile.pylibfdt
+index 015a05e..82f565e 100644
+--- a/pylibfdt/Makefile.pylibfdt
++++ b/pylibfdt/Makefile.pylibfdt
+@@ -9,8 +9,7 @@ PYLIBFDT_CLEANFILES = $(PYLIBFDT_CLEANFILES_L:%=$(PYLIBFDT_dir)/%)
+ PYLIBFDT_CLEANDIRS_L = build __pycache__
+ PYLIBFDT_CLEANDIRS = $(PYLIBFDT_CLEANDIRS_L:%=$(PYLIBFDT_dir)/%)
+ 
+-SETUP = $(PYLIBFDT_dir)/setup.py
+-SETUPFLAGS = --top-builddir .
++SETUP = ./setup.py
+ 
+ ifndef V
+ SETUPFLAGS += --quiet
+diff --git a/pylibfdt/meson.build b/pylibfdt/meson.build
+index fad5aa1..f684cbb 100644
+--- a/pylibfdt/meson.build
++++ b/pylibfdt/meson.build
+@@ -1,5 +1,5 @@
+-setup_py = find_program('setup.py')
+-setup_py = [setup_py.path(), '--quiet', '--top-builddir', meson.current_build_dir() / '..']
++setup_py = find_program('../setup.py')
++setup_py = [setup_py.path(), '--quiet', '--top-builddir', meson.project_build_root()]
+ 
+ custom_target(
+   'pylibfdt',
+diff --git a/setup.py b/setup.py
+new file mode 100755
+index 0000000..4b07be9
+--- /dev/null
++++ b/setup.py
+@@ -0,0 +1,51 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: (GPL-2.0-or-later OR BSD-2-Clause)
++
++# While Python 3 is the default, it's also possible to invoke
++# this setup.py script with Python 2.
++
++"""
++setup.py file for SWIG libfdt
++Copyright (C) 2017 Google, Inc.
++Written by Simon Glass <sjg@chromium.org>
++"""
++
++from setuptools import setup, Extension
++import os
++import re
++import sys
++
++srcdir = os.path.dirname(__file__)
++
++def get_top_builddir():
++    if '--top-builddir' in sys.argv:
++        index = sys.argv.index('--top-builddir')
++        sys.argv.pop(index)
++        return sys.argv.pop(index)
++    else:
++        return srcdir
++
++top_builddir = get_top_builddir()
++
++libfdt_module = Extension(
++    '_libfdt',
++    sources=[os.path.join(srcdir, 'pylibfdt/libfdt.i')],
++    include_dirs=[os.path.join(srcdir, 'libfdt')],
++    libraries=['fdt'],
++    library_dirs=[os.path.join(top_builddir, 'libfdt')],
++    swig_opts=['-I' + os.path.join(srcdir, 'libfdt')],
++)
++
++setup(
++    name='libfdt',
++    use_scm_version={
++        "root": srcdir,
++    },
++    setup_requires = ['setuptools_scm'],
++    author='Simon Glass',
++    author_email='sjg@chromium.org',
++    description='Python binding for libfdt',
++    ext_modules=[libfdt_module],
++    package_dir={'': os.path.join(srcdir, 'pylibfdt')},
++    py_modules=['libfdt'],
++)
