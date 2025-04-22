@@ -5,7 +5,9 @@
  * Copyright (C) 2006 David Gibson, IBM Corporation.
  */
 
+#ifndef _GNU_SOURCE
 #define _GNU_SOURCE /* for strsignal() in glibc.  FreeBSD has it either way */
+#endif
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -17,7 +19,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 
-#if NO_VALGRIND
+#ifdef NO_VALGRIND
 static inline void VALGRIND_MAKE_MEM_UNDEFINED(void *p, size_t len)
 {
 }
@@ -88,7 +90,7 @@ void check_mem_rsv(void *fdt, int n, uint64_t addr, uint64_t size)
 }
 
 void check_property(void *fdt, int nodeoffset, const char *name,
-		    int len, const void *val)
+		    unsigned int len, const void *val)
 {
 	const struct fdt_property *prop;
 	int retlen, namelen;
@@ -101,6 +103,9 @@ void check_property(void *fdt, int nodeoffset, const char *name,
 	if (! prop)
 		FAIL("Error retrieving \"%s\" pointer: %s", name,
 		     fdt_strerror(retlen));
+	if (retlen < 0)
+		FAIL("negative name length (%d) for returned property\n",
+		     retlen);
 
 	tag = fdt32_to_cpu(prop->tag);
 	nameoff = fdt32_to_cpu(prop->nameoff);
@@ -112,13 +117,16 @@ void check_property(void *fdt, int nodeoffset, const char *name,
 	propname = fdt_get_string(fdt, nameoff, &namelen);
 	if (!propname)
 		FAIL("Couldn't get property name: %s", fdt_strerror(namelen));
-	if (namelen != strlen(propname))
+	if (namelen < 0)
+		FAIL("negative name length (%d) for returned string\n",
+		     namelen);
+	if ((unsigned)namelen != strlen(propname))
 		FAIL("Incorrect prop name length: %d instead of %zd",
 		     namelen, strlen(propname));
 	if (!streq(propname, name))
 		FAIL("Property name mismatch \"%s\" instead of \"%s\"",
 		     propname, name);
-	if (proplen != retlen)
+	if (proplen != (unsigned)retlen)
 		FAIL("Length retrieved for \"%s\" by fdt_get_property()"
 		     " differs from stored length (%d != %d)",
 		     name, retlen, proplen);
@@ -332,19 +340,14 @@ void save_blob(const char *filename, void *fdt)
 	free(tmp);
 }
 
-void *open_blob_rw(void *blob)
+void *open_blob_rw(const void *blob)
 {
 	int err;
-	void *buf = blob;
+	void *buf;
+	int newsize = fdt_totalsize(blob) + 8;
 
-	err = fdt_open_into(blob, buf, fdt_totalsize(blob));
-	if (err == -FDT_ERR_NOSPACE) {
-		/* Ran out of space converting to v17 */
-		int newsize = fdt_totalsize(blob) + 8;
-
-		buf = xmalloc(newsize);
-		err = fdt_open_into(blob, buf, newsize);
-	}
+	buf = xmalloc(newsize);
+	err = fdt_open_into(blob, buf, newsize);
 	if (err)
 		FAIL("fdt_open_into(): %s", fdt_strerror(err));
 	return buf;

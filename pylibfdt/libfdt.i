@@ -295,7 +295,9 @@ class FdtRo(object):
         Returns:
             Number of memory reserve-map records
         """
-        return check_err(fdt_get_mem_rsv(self._fdt, index), quiet)
+        val = fdt_get_mem_rsv(self._fdt, index)
+        check_err(val[0], quiet)
+        return val[1:]
 
     def subnode_offset(self, parentoffset, name, quiet=()):
         """Get the offset of a named subnode
@@ -419,6 +421,35 @@ class FdtRo(object):
             return pdata
         return Property(prop_name, bytearray(pdata[0]))
 
+    def hasprop(self, nodeoffset, prop_name, quiet=()):
+        """Check if a node has a property
+
+        This can be used to check boolean properties
+
+        Args:
+            nodeoffset: Node offset containing property to check
+            prop_name: Name of property to check
+            quiet: Errors to ignore (empty to raise on all errors). Note that
+                NOTFOUND is added internally by this function so need not be
+                provided
+
+        Returns:
+            True if the property exists in the node, else False. If an error
+                other than -NOTFOUND is returned by fdt_getprop() then the error
+                is return (-ve integer)
+
+        Raises:
+            FdtError if any error occurs other than NOTFOUND (e.g. the
+                nodeoffset is invalid)
+        """
+        pdata = check_err_null(fdt_getprop(self._fdt, nodeoffset, prop_name),
+                               quiet + (NOTFOUND,))
+        if isinstance(pdata, (int)):
+            if pdata == -NOTFOUND:
+                return False
+            return pdata
+        return True
+
     def get_phandle(self, nodeoffset):
         """Get the phandle of a node
 
@@ -442,6 +473,29 @@ class FdtRo(object):
             None, if the given alias or the /aliases node does not exist
         """
         return fdt_get_alias(self._fdt, name)
+
+    def get_path(self, nodeoffset, size_hint=1024, quiet=()):
+        """Get the full path of a node
+
+        Args:
+            nodeoffset: Node offset to check
+            size_hint: Hint for size of returned string
+
+        Returns:
+            Full path to the node
+
+        Raises:
+            FdtException if an error occurs
+        """
+        while True:
+            ret, path = fdt_get_path(self._fdt, nodeoffset, size_hint)
+            if ret == -NOSPACE:
+                size_hint *= 2
+                continue
+            err = check_err(ret, quiet)
+            if err:
+                return err
+            return path
 
     def parent_offset(self, nodeoffset, quiet=()):
         """Get the offset of a node's parent
@@ -582,6 +636,32 @@ class Fdt(FdtRo):
         return check_err(fdt_setprop(self._fdt, nodeoffset, prop_name, val,
                                      len(val)), quiet)
 
+    def setprop_bool(self, nodeoffset, prop_name, val, quiet=()):
+        """Set the boolean value of a property
+
+        Either:
+            adds the property if not already present; or
+            deletes the property if present
+
+        Args:
+            nodeoffset: Node offset containing the property to create/delete
+            prop_name: Name of property
+            val: Boolean value to write (i.e. True or False)
+            quiet: Errors to ignore (empty to raise on all errors)
+
+        Returns:
+            Error code, or 0 if OK
+
+        Raises:
+            FdtException if no parent found or other error occurs
+        """
+        exists = self.hasprop(nodeoffset, prop_name, quiet)
+        if val != exists:
+            if val:
+                return self.setprop(nodeoffset, prop_name, b'', quiet=quiet)
+            else:
+                return self.delprop(nodeoffset, prop_name, quiet=quiet)
+
     def setprop_u32(self, nodeoffset, prop_name, val, quiet=()):
         """Set the value of a property
 
@@ -716,6 +796,21 @@ class Property(bytearray):
     def as_int64(self):
         return self.as_cell('q')
 
+    def as_list(self, fmt):
+        return list(map(lambda x: x[0], struct.iter_unpack('>' + fmt, self)))
+
+    def as_uint32_list(self):
+        return self.as_list('L')
+
+    def as_int32_list(self):
+        return self.as_list('l')
+
+    def as_uint64_list(self):
+        return self.as_list('Q')
+
+    def as_int64_list(self):
+        return self.as_list('q')
+
     def as_str(self):
         """Unicode is supported by decoding from UTF-8"""
         if self[-1] != 0:
@@ -723,6 +818,13 @@ class Property(bytearray):
         if 0 in self[:-1]:
             raise ValueError('Property contains embedded nul characters')
         return self[:-1].decode('utf-8')
+
+    def as_stringlist(self):
+        """Unicode is supported by decoding from UTF-8"""
+        if self[-1] != 0:
+            raise ValueError('Property lacks nul termination')
+        parts = self[:-1].split(b'\x00')
+        return list(map(lambda x: x.decode('utf-8'), parts))
 
 
 class FdtSw(FdtRo):
@@ -991,6 +1093,9 @@ class NodeAdder():
 
 %rename(fdt_property) fdt_property_func;
 
+%immutable fdt_property::data;
+%immutable fdt_node_header::name;
+
 /*
  * fdt32_t is a big-endian 32-bit value defined to uint32_t in libfdt_env.h
  * so use the same type here.
@@ -1009,7 +1114,7 @@ typedef uint32_t fdt32_t;
 	}
 	$1 = (void *)PyByteArray_AsString($input);
         fdt = $1;
-        fdt = fdt; /* avoid unused variable warning */
+        (void)fdt; /* avoid unused variable warning */
 }
 
 /* Some functions do change the device tree, so use void * */
@@ -1020,7 +1125,7 @@ typedef uint32_t fdt32_t;
 	}
 	$1 = PyByteArray_AsString($input);
         fdt = $1;
-        fdt = fdt; /* avoid unused variable warning */
+        (void)fdt; /* avoid unused variable warning */
 }
 
 /* typemap used for fdt_get_property_by_offset() */
@@ -1032,7 +1137,7 @@ typedef uint32_t fdt32_t;
 			fdt_string(fdt1, fdt32_to_cpu($1->nameoff)));
 		buff = PyByteArray_FromStringAndSize(
 			(const char *)($1 + 1), fdt32_to_cpu($1->len));
-		resultobj = SWIG_Python_AppendOutput(resultobj, buff);
+		resultobj = SWIG_AppendOutput(resultobj, buff);
 	}
 }
 
@@ -1040,14 +1145,16 @@ typedef uint32_t fdt32_t;
 
 /* typemap used for fdt_getprop() */
 %typemap(out) (const void *) {
-	if (!$1)
+	if (!$1) {
 		$result = Py_None;
-	else
+		Py_INCREF($result);
+	} else {
         %#if PY_VERSION_HEX >= 0x03000000
-            $result = Py_BuildValue("y#", $1, *arg4);
+            $result = Py_BuildValue("y#", $1, (Py_ssize_t)*arg4);
         %#else
-            $result = Py_BuildValue("s#", $1, *arg4);
+            $result = Py_BuildValue("s#", $1, (Py_ssize_t)*arg4);
         %#endif
+    }
 }
 
 /* typemap used for fdt_setprop() */
@@ -1071,7 +1178,7 @@ typedef uint32_t fdt32_t;
 
 %typemap(argout) int *depth {
         PyObject *val = Py_BuildValue("i", *arg$argnum);
-        resultobj = SWIG_Python_AppendOutput(resultobj, val);
+        resultobj = SWIG_AppendOutput(resultobj, val);
 }
 
 %apply int *depth { int *depth };
@@ -1083,13 +1190,13 @@ typedef uint32_t fdt32_t;
 
 %typemap(argout) uint64_t * {
         PyObject *val = PyLong_FromUnsignedLongLong(*arg$argnum);
-        if (!result) {
-           if (PyTuple_GET_SIZE(resultobj) == 0)
-              resultobj = val;
-           else
-              resultobj = SWIG_Python_AppendOutput(resultobj, val);
-        }
+        resultobj = SWIG_AppendOutput(resultobj, val);
 }
+
+%include "cstring.i"
+
+%cstring_output_maxsize(char *buf, int buflen);
+int fdt_get_path(const void *fdt, int nodeoffset, char *buf, int buflen);
 
 /* We have both struct fdt_property and a function fdt_property() */
 %warnfilter(302) fdt_property;

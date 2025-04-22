@@ -18,7 +18,9 @@ if [ -n "$NO_PYTHON" ]; then
         no_python=false
     fi
 else
-    if [ -f ../pylibfdt/_libfdt.so ] || [ -f ../pylibfdt/_libfdt.cpython-3*.so ]; then
+    if [ -f ../pylibfdt/_libfdt.so ] \
+            || [ -f ../pylibfdt/_libfdt.cpython-3*.so ] \
+            || [ -f ../build/lib.*/_libfdt.cpython-3*.so ]; then
         no_python=false
     else
         no_python=true
@@ -32,7 +34,7 @@ if [ -n "$NO_YAML" ]; then
         no_yaml=false
     fi
 else
-    if pkg-config --exists yaml-0.1; then
+    if ${PKG_CONFIG:-pkg-config} --atleast-version 0.2.3 yaml-0.1; then
         no_yaml=false
     else
         no_yaml=true
@@ -55,7 +57,21 @@ fi
 if [ -z "$TEST_LIBDIR" ]; then
     TEST_LIBDIR=../libfdt
 fi
-export LD_LIBRARY_PATH="$TEST_LIBDIR"
+if [ -n "$LD_LIBRARY_PATH" ]; then
+    export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$TEST_LIBDIR"
+else
+    export LD_LIBRARY_PATH="$TEST_LIBDIR"
+fi
+
+# Find the python module that distutils builds under a machine-specific path
+PYLIBFDT_BUILD=$(echo ../build/lib.*)
+if [ -e "$PYLIBFDT_BUILD" ]; then
+    if [ -n "$PYTHONPATH" ]; then
+        export PYTHONPATH="$PYTHONPATH:$PYLIBFDT_BUILD"
+    else
+        export PYTHONPATH="$PYLIBFDT_BUILD"
+    fi
+fi
 
 export QUIET_TEST=1
 STOP_ON_FAIL=0
@@ -195,7 +211,7 @@ asm_to_so_test () {
 run_fdtget_test () {
     expect="$1"
     shift
-    printf "fdtget-runtest.sh %s $*:	" "$(echo $expect)"
+    printf "fdtget-runtest.sh \"%s\" $*:	" "$expect"
     base_run_test sh "$SRCDIR/fdtget-runtest.sh" "$expect" "$@"
 }
 
@@ -269,8 +285,9 @@ libfdt_overlay_tests () {
     for test in $BAD_FIXUP_TREES; do
 	tree="overlay_bad_fixup_$test"
 	run_dtc_test -I dts -O dtb -o $tree.test.dtb "$SRCDIR/$tree.dts"
-	run_test overlay_bad_fixup overlay_base_no_symbols.test.dtb $tree.test.dtb
+	run_test overlay_bad_fixup overlay_base_manual_symbols.test.dtb $tree.test.dtb
     done
+    run_sh_test "$SRCDIR/dtc-fatal.sh" -I dts -O dtb -o /dev/null "$SRCDIR/fixup-ref-to-path.dts"
 }
 
 # Tests to exercise dtc's overlay generation support
@@ -288,7 +305,7 @@ dtc_overlay_tests () {
     run_test check_path overlay_overlay.test.dtb exists "/__local_fixups__"
 
     # Without syntactic sugar
-    run_dtc_test -I dts -O dtb -o overlay_overlay_nosugar.test.dtb "$SRCDIR/overlay_overlay.dts"
+    run_dtc_test -I dts -O dtb -o overlay_overlay_nosugar.test.dtb "$SRCDIR/overlay_overlay_nosugar.dts"
     run_test check_path overlay_overlay_nosugar.test.dtb not-exists "/__symbols__"
     run_test check_path overlay_overlay_nosugar.test.dtb exists "/__fixups__"
     run_test check_path overlay_overlay_nosugar.test.dtb exists "/__local_fixups__"
@@ -372,9 +389,10 @@ tree1_tests_rw () {
 check_tests () {
     tree="$1"
     shift
+    dtb=$(basename "$tree" .dts).test.dtb
     run_sh_test "$SRCDIR/dtc-checkfails.sh" "$@" -- -I dts -O dtb $tree
-    run_dtc_test -I dts -O dtb -o $tree.test.dtb -f $tree
-    run_sh_test "$SRCDIR/dtc-checkfails.sh" "$@" -- -I dtb -O dtb $tree.test.dtb
+    run_dtc_test -I dts -O dtb -o "$dtb" -f $tree
+    run_sh_test "$SRCDIR/dtc-checkfails.sh" "$@" -- -I dtb -O dtb "$dtb"
 }
 
 ALL_LAYOUTS="mts mst tms tsm smt stm"
@@ -495,13 +513,13 @@ libfdt_tests () {
 
     run_dtc_test -I dts -O dtb "$SRCDIR/bad-size-cells.dts"
 
-    run_wrap_error_test $DTC division-by-zero.dts
-    run_wrap_error_test $DTC bad-octal-literal.dts
+    run_wrap_error_test $DTC "$SRCDIR/division-by-zero.dts"
+    run_wrap_error_test $DTC "$SRCDIR/bad-octal-literal.dts"
     run_dtc_test -I dts -O dtb "$SRCDIR/nul-in-escape.dts"
-    run_wrap_error_test $DTC nul-in-line-info1.dts
-    run_wrap_error_test $DTC nul-in-line-info2.dts
+    run_wrap_error_test $DTC "$SRCDIR/nul-in-line-info1.dts"
+    run_wrap_error_test $DTC "$SRCDIR/nul-in-line-info2.dts"
 
-    run_wrap_error_test $DTC -I dtb -O dts -o /dev/null ovf_size_strings.dtb
+    run_wrap_error_test $DTC -I dtb -O dts -o /dev/null "$SRCDIR/ovf_size_strings.dtb"
 
     run_test check_header test_tree1.dtb
 
@@ -512,13 +530,22 @@ libfdt_tests () {
     run_dtc_test -I fs -O dts -o fs.test_tree1.test.dts $FSBASE/test_tree1
     run_dtc_test -I fs -O dtb -o fs.test_tree1.test.dtb $FSBASE/test_tree1
     run_test dtbs_equal_unordered -m fs.test_tree1.test.dtb test_tree1.dtb
+    run_test get_next_tag_invalid_prop_len
+
+    ## https://github.com/dgibson/dtc/issues/64
+    check_tests "$SRCDIR/phandle-args-overflow.dts" clocks_property
+
+    ## https://github.com/dgibson/dtc/issues/74
+    run_dtc_test -I dts -O dtb -o cell-overflow-results.test.dtb "$SRCDIR/cell-overflow-results.dts"
+    run_dtc_test -I dts -O dtb -o cell-overflow.test.dtb "$SRCDIR/cell-overflow.dts"
+    run_test dtbs_equal_ordered cell-overflow.test.dtb cell-overflow-results.test.dtb
 
     # check full tests
     for good in test_tree1.dtb; do
 	run_test check_full $good
     done
     for bad in truncated_property.dtb truncated_string.dtb \
-				      truncated_memrsv.dtb; do
+		truncated_memrsv.dtb two_roots.dtb named_root.dtb; do
 	run_test check_full -n $bad
     done
 }
@@ -604,11 +631,15 @@ dtc_tests () {
 	run_dtc_test -I dts -O asm -o oasm_$tree.test.s "$SRCDIR/$tree"
 	asm_to_so_test oasm_$tree
 	run_dtc_test -I dts -O dtb -o $tree.test.dtb "$SRCDIR/$tree"
-	run_test asm_tree_dump ./oasm_$tree.test.so oasm_$tree.test.dtb
-	run_wrap_test cmp oasm_$tree.test.dtb $tree.test.dtb
+	if [ -x ./asm_tree_dump ]; then
+	    run_test asm_tree_dump ./oasm_$tree.test.so oasm_$tree.test.dtb
+	    run_wrap_test cmp oasm_$tree.test.dtb $tree.test.dtb
+	fi
     done
 
-    run_test value-labels ./oasm_value-labels.dts.test.so
+    if [ -x ./value-labels ]; then
+	run_test value-labels ./oasm_value-labels.dts.test.so
+    fi
 
     # Check -Odts mode preserve all dtb information
     for tree in test_tree1.dtb dtc_tree1.test.dtb dtc_escapes.test.dtb \
@@ -619,6 +650,10 @@ dtc_tests () {
     done
 
     # Check -Odts preserving type information
+    run_dtc_test -I dts -O dtb -o stringlist.test.dtb "$SRCDIR/stringlist.dts"
+    run_dtc_test -I dtb -O dts -o stringlist.test.dts stringlist.test.dtb
+    run_wrap_test cmp "$SRCDIR/stringlist.dts" stringlist.test.dts
+
     for tree in type-preservation.dts; do
         run_dtc_test -I dts -O dts -o $tree.test.dts "$SRCDIR/$tree"
         run_dtc_test -I dts -O dts $tree.test.dts
@@ -666,6 +701,9 @@ dtc_tests () {
     tree1_tests dtc_tree1_merge_path.test.dtb test_tree1.dtb
     run_wrap_error_test $DTC -I dts -O dtb -o /dev/null "$SRCDIR/test_label_ref.dts"
 
+    run_dtc_test -I dts -O dtb -o dtc_relref_merge.test.dtb "$SRCDIR/relref_merge.dts"
+    run_test relref_merge dtc_relref_merge.test.dtb
+
     # Check prop/node delete functionality
     run_dtc_test -I dts -O dtb -o dtc_tree1_delete.test.dtb "$SRCDIR/test_tree1_delete.dts"
     tree1_tests dtc_tree1_delete.test.dtb
@@ -691,7 +729,7 @@ dtc_tests () {
     run_sh_test "$SRCDIR/dtc-fatal.sh" -I dts -O dtb "$SRCDIR/nonexist-node-ref2.dts"
     check_tests "$SRCDIR/bad-name-property.dts" name_properties
 
-    check_tests "$SRCDIR/bad-ncells.dts" address_cells_is_cell size_cells_is_cell interrupt_cells_is_cell
+    check_tests "$SRCDIR/bad-ncells.dts" address_cells_is_cell size_cells_is_cell interrupts_extended_is_cell
     check_tests "$SRCDIR/bad-string-props.dts" device_type_is_string model_is_string status_is_string label_is_string compatible_is_string_list names_is_string_list
     check_tests "$SRCDIR/bad-chosen.dts" chosen_node_is_root
     check_tests "$SRCDIR/bad-chosen.dts" chosen_node_bootargs
@@ -709,11 +747,24 @@ dtc_tests () {
     check_tests "$SRCDIR/unit-addr-unique.dts" unique_unit_address
     check_tests "$SRCDIR/bad-phandle-cells.dts" interrupts_extended_property
     check_tests "$SRCDIR/bad-gpio.dts" gpios_property
+    check_tests "$SRCDIR/good-gpio.dts" -n gpios_property
     check_tests "$SRCDIR/bad-graph.dts" graph_child_address
     check_tests "$SRCDIR/bad-graph.dts" graph_port
     check_tests "$SRCDIR/bad-graph.dts" graph_endpoint
+    check_tests "$SRCDIR/bad-graph-root1.dts" graph_nodes
+    check_tests "$SRCDIR/bad-graph-root2.dts" graph_nodes
+    check_tests "$SRCDIR/bad-graph-root3.dts" graph_nodes
+    check_tests "$SRCDIR/bad-graph-root4.dts" graph_nodes
+    check_tests "$SRCDIR/bad-graph-reg-cells.dts" graph_endpoint
+    check_tests "$SRCDIR/bad-graph-reg-cells.dts" graph_port
+    check_tests "$SRCDIR/bad-graph-child-address.dts" graph_child_address
     run_sh_test "$SRCDIR/dtc-checkfails.sh" deprecated_gpio_property -- -Wdeprecated_gpio_property -I dts -O dtb "$SRCDIR/bad-gpio.dts"
+    run_sh_test "$SRCDIR/dtc-checkfails.sh" -n deprecated_gpio_property -- -Wdeprecated_gpio_property -I dts -O dtb "$SRCDIR/good-gpio.dts"
     check_tests "$SRCDIR/bad-interrupt-cells.dts" interrupts_property
+    check_tests "$SRCDIR/bad-interrupt-controller.dts" interrupt_provider
+    check_tests "$SRCDIR/bad-interrupt-map.dts" interrupt_map
+    check_tests "$SRCDIR/bad-interrupt-map-parent.dts" interrupt_map
+    check_tests "$SRCDIR/bad-interrupt-map-mask.dts" interrupt_map
     run_sh_test "$SRCDIR/dtc-checkfails.sh" node_name_chars -- -I dtb -O dtb bad_node_char.dtb
     run_sh_test "$SRCDIR/dtc-checkfails.sh" node_name_format -- -I dtb -O dtb bad_node_format.dtb
     run_sh_test "$SRCDIR/dtc-checkfails.sh" property_name_chars -- -I dtb -O dtb bad_prop_char.dtb
@@ -737,9 +788,9 @@ dtc_tests () {
 
 
     # Check warning options
-    run_sh_test "$SRCDIR/dtc-checkfails.sh" address_cells_is_cell interrupt_cells_is_cell -n size_cells_is_cell -- -Wno_size_cells_is_cell -I dts -O dtb "$SRCDIR/bad-ncells.dts"
+    run_sh_test "$SRCDIR/dtc-checkfails.sh" address_cells_is_cell interrupts_extended_is_cell -n size_cells_is_cell -- -Wno_size_cells_is_cell -I dts -O dtb "$SRCDIR/bad-ncells.dts"
     run_sh_test "$SRCDIR/dtc-fails.sh" -n test-warn-output.test.dtb -I dts -O dtb "$SRCDIR/bad-ncells.dts"
-    run_sh_test "$SRCDIR/dtc-fails.sh" test-error-output.test.dtb -I dts -O dtb bad-ncells.dts -Esize_cells_is_cell
+    run_sh_test "$SRCDIR/dtc-fails.sh" test-error-output.test.dtb -I dts -O dtb "$SRCDIR/bad-ncells.dts" -Esize_cells_is_cell
     run_sh_test "$SRCDIR/dtc-checkfails.sh" always_fail -- -Walways_fail -I dts -O dtb "$SRCDIR/test_tree1.dts"
     run_sh_test "$SRCDIR/dtc-checkfails.sh" -n always_fail -- -Walways_fail -Wno_always_fail -I dts -O dtb "$SRCDIR/test_tree1.dts"
     run_sh_test "$SRCDIR/dtc-fails.sh" test-negation-1.test.dtb -Ealways_fail -I dts -O dtb "$SRCDIR/test_tree1.dts"
@@ -849,6 +900,8 @@ fdtget_tests () {
     run_fdtget_test 8000 -tx $dtb /cpus/PowerPC,970@1 d-cache-size
     run_fdtget_test "61 62 63 0" -tbx $dtb /randomnode tricky1
     run_fdtget_test "a b c d de ea ad be ef" -tbx $dtb /randomnode blob
+    run_fdtget_test "MyBoardName\0MyBoardFamilyName\0" -tr $dtb / compatible
+    run_fdtget_test "\012\013\014\015\336\352\255\276\357" -tr $dtb /randomnode blob
 
     # Here the property size is not a multiple of 4 bytes, so it should fail
     run_wrap_error_test $DTGET -tlx $dtb /randomnode mixed
@@ -1003,6 +1056,34 @@ fdtoverlay_tests() {
     run_dtc_test -@ -I dts -O dtb -o $stacked_addlabeldtb $stacked_addlabel
 
     run_fdtoverlay_test baz "/foonode/barnode/baznode" "baz-property" "-ts" ${stacked_base_nolabeldtb} ${stacked_addlabel_targetdtb} ${stacked_addlabeldtb} ${stacked_bardtb} ${stacked_bazdtb}
+
+    # verify that phandles are not overwritten
+    run_dtc_test -@ -I dts -O dtb -o overlay_base_phandle.test.dtb "$SRCDIR/overlay_base_phandle.dts"
+    run_dtc_test -@ -I dts -O dtb -o overlay_overlay_phandle.test.dtb "$SRCDIR/overlay_overlay_phandle.dts"
+    run_wrap_test $FDTOVERLAY -i overlay_base_phandle.test.dtb -o overlay_base_phandleO.test.dtb overlay_overlay_phandle.test.dtb
+
+    pa=$($DTGET overlay_base_phandleO.test.dtb /a phandle)
+    pb=$($DTGET overlay_base_phandleO.test.dtb /b phandle)
+    pc=$($DTGET overlay_base_phandleO.test.dtb /c phandle)
+    pd=$($DTGET overlay_base_phandleO.test.dtb /d phandle)
+    ba=$($DTGET overlay_base_phandleO.test.dtb /b a)
+    bd=$($DTGET overlay_base_phandleO.test.dtb /b d)
+    cb=$($DTGET overlay_base_phandleO.test.dtb /c b)
+    da=$($DTGET overlay_base_phandleO.test.dtb /d a)
+    db=$($DTGET overlay_base_phandleO.test.dtb /d b)
+    dc=$($DTGET overlay_base_phandleO.test.dtb /d c)
+
+    shorten_echo "check phandle to noda a wasn't overwritten:	"
+    run_wrap_test test "$ba-$da" = "$pa-$pa"
+
+    shorten_echo "check phandle to noda b wasn't overwritten:	"
+    run_wrap_test test "$cb-$db" = "$pb-$pb"
+
+    shorten_echo "check phandle to noda c wasn't overwritten:	"
+    run_wrap_test test "$dc" = "$pc"
+
+    shorten_echo "check phandle to noda d wasn't overwritten:	"
+    run_wrap_test test "$bd" = "$pd"
 }
 
 pylibfdt_tests () {
