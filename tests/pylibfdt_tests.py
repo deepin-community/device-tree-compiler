@@ -348,6 +348,20 @@ class PyLibfdtBasicTests(unittest.TestCase):
         self.assertEqual("/subnode@1/subsubnode", self.fdt3.get_alias('ss1'))
         self.assertEqual("/subnode@1/subsubnode/subsubsubnode", self.fdt3.get_alias('sss1'))
 
+    def testGetPath(self):
+        """Test for the get_path() method"""
+        node = self.fdt.path_offset('/subnode@1')
+        node2 = self.fdt.path_offset('/subnode@1/subsubnode')
+        self.assertEqual("/subnode@1", self.fdt.get_path(node))
+        self.assertEqual("/subnode@1/subsubnode", self.fdt.get_path(node2))
+        self.assertEqual("/subnode@1/subsubnode", self.fdt.get_path(node2, size_hint=1))
+
+        with self.assertRaises(FdtException) as e:
+            self.fdt.get_path(-1)
+        self.assertEqual(e.exception.err, -libfdt.BADOFFSET)
+
+        self.assertEqual(-libfdt.BADOFFSET, self.fdt.get_path(-1, quiet=(libfdt.BADOFFSET,)))
+
     def testParentOffset(self):
         """Test for the parent_offset() method"""
         self.assertEqual(-libfdt.NOTFOUND,
@@ -381,6 +395,25 @@ class PyLibfdtBasicTests(unittest.TestCase):
         self.assertEqual(9223372036854775807,
                           self.get_prop("prop-uint64").as_uint64())
         self.assertEqual(-2, self.get_prop("prop-int64").as_int64())
+
+    def testGetIntListProperties(self):
+        """Test that we can access properties as integer lists"""
+        self.assertEqual([128, -16, -2],
+                         self.get_prop("prop-int32-array").as_int32_list())
+        self.assertEqual([0x1, 0x98765432, 0xdeadbeef],
+                         self.get_prop("prop-uint32-array").as_uint32_list())
+        self.assertEqual([0x100000000, -2],
+                         self.get_prop("prop-int64-array").as_int64_list())
+        self.assertEqual([0x100000000, 0x1],
+                         self.get_prop("prop-uint64-array").as_uint64_list())
+
+    def testGetStringlistProperties(self):
+        """Test that we can access properties as string list"""
+        node = self.fdt.path_offset('/subnode@1/subsubnode')
+        self.assertEqual(["subsubnode1", "subsubnode"],
+                         self.fdt.getprop(node, "compatible").as_stringlist())
+        self.assertEqual(["this is a placeholder string", "string2"],
+                         self.fdt.getprop(node, "placeholder").as_stringlist())
 
     def testReserveMap(self):
         """Test that we can access the memory reserve map"""
@@ -462,6 +495,39 @@ class PyLibfdtBasicTests(unittest.TestCase):
         self.fdt.setprop_str(node, prop, TEST_STRING_3)
         self.assertEqual(TEST_STRING_3,
                           self.fdt.getprop(node, prop).as_str())
+
+    def testHasProp(self):
+        """Test that we can check if a node has a property"""
+        node = 0
+        self.assertFalse(self.fdt2.hasprop(node, 'missing'))
+        self.assertTrue(self.fdt2.hasprop(node, 'prop-bool'))
+
+        # Test a property with a non-empty value
+        self.assertTrue(self.fdt2.hasprop(node, 'prop-uint64'))
+
+    def testSetPropBool(self):
+        """Test that we can update and create boolean properties"""
+        node = 0
+        prop = 'prop-bool'
+
+        # Make some space and then try setting a new boolean property
+        self.fdt.resize(self.fdt.totalsize() + 50)
+        self.fdt.hasprop(node, 'missing')
+        self.fdt.setprop_bool(node, 'missing', True)
+        self.assertTrue(self.fdt.hasprop(node, 'missing'))
+
+        # Trying toggling an existing boolean property. Do each operation twice
+        # to make sure that the behaviour is correct when setting the property
+        # to the same value.
+        self.assertTrue(self.fdt2.hasprop(node, prop))
+        self.fdt2.setprop_bool(node, prop, False)
+        self.assertFalse(self.fdt2.hasprop(node, prop))
+        self.fdt2.setprop_bool(node, prop, False)
+        self.assertFalse(self.fdt2.hasprop(node, prop))
+        self.fdt2.setprop_bool(node, prop, True)
+        self.assertTrue(self.fdt2.hasprop(node, prop))
+        self.fdt2.setprop_bool(node, prop, True)
+        self.assertTrue(self.fdt2.hasprop(node, prop))
 
     def testSetName(self):
         """Test that we can update a node name"""

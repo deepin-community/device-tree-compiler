@@ -1,0 +1,19 @@
+From: Bastian Germann <bage@debian.org>
+Date: Fri, 20 May 2022 19:00:00 +0200
+Subject: pylibfdt: Install to dist-packages
+
+Signed-off-by: Bastian Germann <bage@debian.org>
+---
+diff --git a/pylibfdt/Makefile.pylibfdt b/pylibfdt/Makefile.pylibfdt
+index b1c80af..deb3f91 100644
+--- a/pylibfdt/Makefile.pylibfdt
++++ b/pylibfdt/Makefile.pylibfdt
+@@ -21,7 +21,7 @@ $(PYMODULE): $(PYLIBFDT_srcs) $(LIBFDT_archive) $(SETUP) $(VERSION_FILE)
+ 
+ install_pylibfdt: $(PYMODULE)
+ 	@$(VECHO) INSTALL-PYLIB
+-	$(PYTHON) $(SETUP) $(SETUPFLAGS) install --prefix=$(PREFIX)
++	$(PYTHON) $(SETUP) $(SETUPFLAGS) install --prefix=$(PREFIX) --root=/ --install-lib=$(PREFIX)/lib/python3/dist-packages --install-layout=deb --single-version-externally-managed
+ 
+ pylibfdt_clean:
+ 	@$(VECHO) CLEAN "(pylibfdt)"

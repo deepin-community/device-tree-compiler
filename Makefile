@@ -5,14 +5,11 @@
 
 #
 # Version information will be constructed in this order:
-# EXTRAVERSION might be "-rc", for example.
+# DTC_VERSION release version as MAJOR.MINOR.PATCH
 # LOCAL_VERSION is likely from command line.
 # CONFIG_LOCALVERSION from some future config system.
 #
-VERSION = 1
-PATCHLEVEL = 6
-SUBLEVEL = 0
-EXTRAVERSION =
+DTC_VERSION = $(shell cat VERSION.txt)
 LOCAL_VERSION =
 CONFIG_LOCALVERSION =
 
@@ -21,8 +18,9 @@ CONFIG_LOCALVERSION =
 ASSUME_MASK ?= 0
 
 CPPFLAGS = -I libfdt -I . -DFDT_ASSUME_MASK=$(ASSUME_MASK)
-WARNINGS = -Wall -Wpointer-arith -Wcast-qual -Wnested-externs \
-	-Wstrict-prototypes -Wmissing-prototypes -Wredundant-decls -Wshadow
+WARNINGS = -Wall -Wpointer-arith -Wcast-qual -Wnested-externs -Wsign-compare \
+	-Wstrict-prototypes -Wmissing-prototypes -Wredundant-decls -Wshadow \
+	-Wsuggest-attribute=format -Wwrite-strings
 CFLAGS = -g -Os $(SHAREDLIB_CFLAGS) -Werror $(WARNINGS) $(EXTRA_CFLAGS)
 
 BISON = bison
@@ -31,7 +29,7 @@ SWIG = swig
 PKG_CONFIG ?= pkg-config
 PYTHON ?= python3
 
-INSTALL = /usr/bin/install
+INSTALL = install
 INSTALL_PROGRAM = $(INSTALL)
 INSTALL_LIB = $(INSTALL)
 INSTALL_DATA = $(INSTALL) -m 644
@@ -54,11 +52,16 @@ else
 	CFLAGS += $(shell $(PKG_CONFIG) --cflags valgrind)
 endif
 
-NO_YAML := $(shell $(PKG_CONFIG) --exists yaml-0.1; echo $$?)
+# libyaml before version 0.2.3 expects non-const string parameters. Supporting
+# both variants would require either cpp magic or passing
+# -Wno-error=discarded-qualifiers to the compiler. For the sake of simplicity
+# just support libyaml >= 0.2.3.
+NO_YAML := $(shell $(PKG_CONFIG) --atleast-version 0.2.3 yaml-0.1; echo $$?)
 ifeq ($(NO_YAML),1)
 	CFLAGS += -DNO_YAML
 else
 	LDLIBS_dtc += $(shell $(PKG_CONFIG) --libs yaml-0.1)
+	CFLAGS += $(shell $(PKG_CONFIG) --cflags yaml-0.1)
 endif
 
 ifeq ($(HOSTOS),darwin)
@@ -97,7 +100,6 @@ endif
 # Rules for versioning
 #
 
-DTC_VERSION = $(VERSION).$(PATCHLEVEL).$(SUBLEVEL)$(EXTRAVERSION)
 VERSION_FILE = version_gen.h
 
 CONFIG_SHELL := $(shell if [ -x "$$BASH" ]; then echo $$BASH; \
@@ -176,12 +178,14 @@ endif
 
 
 ifneq ($(DEPTARGETS),)
+ifneq ($(MAKECMDGOALS),libfdt)
 -include $(DTC_OBJS:%.o=%.d)
 -include $(CONVERT_OBJS:%.o=%.d)
 -include $(FDTDUMP_OBJS:%.o=%.d)
 -include $(FDTGET_OBJS:%.o=%.d)
 -include $(FDTPUT_OBJS:%.o=%.d)
 -include $(FDTOVERLAY_OBJS:%.o=%.d)
+endif
 endif
 
 
@@ -195,6 +199,13 @@ LIBFDT_lib = $(LIBFDT_dir)/$(LIBFDT_LIB)
 LIBFDT_include = $(addprefix $(LIBFDT_dir)/,$(LIBFDT_INCLUDES))
 LIBFDT_version = $(addprefix $(LIBFDT_dir)/,$(LIBFDT_VERSION))
 
+ifeq ($(STATIC_BUILD),1)
+	CFLAGS += -static
+	LIBFDT_dep = $(LIBFDT_archive)
+else
+	LIBFDT_dep = $(LIBFDT_lib)
+endif
+
 include $(LIBFDT_dir)/Makefile.libfdt
 
 .PHONY: libfdt
@@ -207,6 +218,7 @@ $(LIBFDT_lib): $(addprefix $(LIBFDT_dir)/,$(LIBFDT_OBJS)) $(LIBFDT_version)
 	$(CC) $(LDFLAGS) $(SHAREDLIB_LDFLAGS)$(LIBFDT_soname) -o $(LIBFDT_lib) \
 		$(addprefix $(LIBFDT_dir)/,$(LIBFDT_OBJS))
 	ln -sf $(LIBFDT_LIB) $(LIBFDT_dir)/$(LIBFDT_soname)
+	ln -sf $(LIBFDT_soname) $(LIBFDT_dir)/$(LIBFDT_so)
 
 ifneq ($(DEPTARGETS),)
 -include $(LIBFDT_OBJS:%.o=$(LIBFDT_dir)/%.d)
@@ -223,7 +235,7 @@ install-bin: all $(SCRIPTS)
 	$(INSTALL_PROGRAM) $(BIN) $(DESTDIR)$(BINDIR)
 	$(INSTALL_SCRIPT) $(SCRIPTS) $(DESTDIR)$(BINDIR)
 
-install-lib: all
+install-lib: libfdt
 	@$(VECHO) INSTALL-LIB
 	$(INSTALL) -d $(DESTDIR)$(LIBDIR)
 	$(INSTALL_LIB) $(LIBFDT_lib) $(DESTDIR)$(LIBDIR)
@@ -258,11 +270,11 @@ convert-dtsv0: $(CONVERT_OBJS)
 
 fdtdump:	$(FDTDUMP_OBJS)
 
-fdtget:	$(FDTGET_OBJS) $(LIBFDT_lib)
+fdtget:	$(FDTGET_OBJS) $(LIBFDT_dep)
 
-fdtput:	$(FDTPUT_OBJS) $(LIBFDT_lib)
+fdtput:	$(FDTPUT_OBJS) $(LIBFDT_dep)
 
-fdtoverlay: $(FDTOVERLAY_OBJS) $(LIBFDT_lib)
+fdtoverlay: $(FDTOVERLAY_OBJS) $(LIBFDT_dep)
 
 dist:
 	git archive --format=tar --prefix=dtc-$(dtc_version)/ HEAD \
@@ -318,7 +330,9 @@ ifeq ($(NO_PYTHON),0)
 TESTS_PYLIBFDT += maybe_pylibfdt
 endif
 
+ifneq ($(MAKECMDGOALS),libfdt)
 include tests/Makefile.tests
+endif
 
 #
 # Clean rules
@@ -372,8 +386,12 @@ clean: libfdt_clean pylibfdt_clean tests_clean
 	@$(VECHO) LEX $@
 	$(LEX) -o$@ $<
 
-%.tab.c %.tab.h %.output: %.y
+%.tab.c %.tab.h: %.y
 	@$(VECHO) BISON $@
 	$(BISON) -b $(basename $(basename $@)) -d $<
 
 FORCE:
+
+ifeq ($(MAKE_RESTARTS),10)
+$(error "Make re-executed itself $(MAKE_RESTARTS) times. Infinite recursion?")
+endif

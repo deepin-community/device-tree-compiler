@@ -1,1 +1,3 @@
 01_build_doc.patch
+02_Install_to_dist_packages.patch
+upstream/0006-pylibfdt-libfdt.i-fix-backwards-compatibility-of-ret.patch

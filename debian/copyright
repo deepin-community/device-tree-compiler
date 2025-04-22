@@ -53,40 +53,36 @@ Copyright:
  2016 Konsulko Inc.
  2016 NextThing Co.
  2008 Kumar Gala, Freescale Semiconductor, Inc.
+ 2020 Ahmad Fatoum, Pengutronix.
 License: LGPL-2.1+
 
 Files:
- tests/overlay_bad_fixup_path_empty_prop.dts
- tests/overlay_bad_fixup_empty_index.dts
- tests/overlay_overlay.dts
- tests/overlay_bad_fixup_path_prop.dts
- tests/overlay_overlay_bypath.dts
- tests/overlay_overlay_nosugar.dts
- tests/overlay_overlay_manual_fixups.dts
- tests/overlay_overlay_local_merge.dts
- tests/overlay_bad_fixup_empty.dts
- tests/overlay_base.dts
- tests/dumptrees.c
- tests/overlay_bad_fixup_base.dtsi
  tests/overlay_bad_fixup_bad_index.dts
- tests/overlay_bad_fixup_path_only.dts
- tests/overlay_overlay_simple.dts
- tests/overlay_overlay_no_fixups.dts
- tests/overlay_bad_fixup_index_trailing.dts
- tests/overlay_bad_fixup_path_only_sep.dts
- tests/overlay_base_manual_symbols.dts
- tests/overlay_bad_fixup_path_empty_prop.dts
+ tests/overlay_bad_fixup_base.dtsi
+ tests/overlay_bad_fixup_empty.dts
  tests/overlay_bad_fixup_empty_index.dts
- tests/overlay_overlay.dts
+ tests/overlay_bad_fixup_index_trailing.dts
+ tests/overlay_bad_fixup_path_empty_prop.dts
+ tests/overlay_bad_fixup_path_only.dts
+ tests/overlay_bad_fixup_path_only_sep.dts
  tests/overlay_bad_fixup_path_prop.dts
+ tests/overlay_base.dts
+ tests/overlay_base_manual_symbols.dts
+ tests/overlay_base_phandle.dts
+ tests/overlay_overlay.dts
  tests/overlay_overlay_bypath.dts
- tests/overlay_overlay_nosugar.dts
+ tests/overlay_overlay_local_merge.dts
  tests/overlay_overlay_manual_fixups.dts
+ tests/overlay_overlay_no_fixups.dts
+ tests/overlay_overlay_nosugar.dts
+ tests/overlay_overlay_phandle.dts
+ tests/overlay_overlay_simple.dts
 Copyright:
  David Gibson <dwg@au1.ibm.com>, IBM Corporation.  2006.
  2016 Free Electrons
  2016 Konsulko Inc.
  2016 NextThing Co
+ 2024 Uwe Kleine-König
 License: GPL-2+
  
 Files:
